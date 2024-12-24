@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView, Alert } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../context/ThemeContext';
-import { saveExpense, getExpenses } from '../utils/localStorage';
+import { saveExpense, getExpenses, deleteExpense, updateBudgetAndSpent, getBudgetAndSpent } from '../utils/localStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
 
 const DashboardScreen = ({ navigation }) => {
@@ -12,7 +13,7 @@ const DashboardScreen = ({ navigation }) => {
   const [quickExpense, setQuickExpense] = useState('');
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [budget, setBudget] = useState('0');
-  const [totalSpent, setTotalSpent] = useState(0);
+  const [spent, setSpent] = useState('0'); // Update 1
 
   // Full expense form states
   const [amount, setAmount] = useState('');
@@ -22,39 +23,34 @@ const DashboardScreen = ({ navigation }) => {
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
-    loadBudgetData();
     loadRecentTransactions();
+    loadBudgetData();
   }, []);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadBudgetData();
-      loadRecentTransactions();
-    }, [])
+    }, [loadBudgetData])
   );
 
-  const loadBudgetData = async () => {
-    try {
-      const storedBudget = await AsyncStorage.getItem('budget');
-      if (storedBudget !== null) {
-        setBudget(parseFloat(storedBudget).toFixed(2));
-      }
-    } catch (error) {
-      console.error('Error loading budget data:', error);
-    }
-  };
-
-  const loadRecentTransactions = async () => {
+  const loadRecentTransactions = useCallback(async () => {
     try {
       const expenses = await getExpenses();
-      const sortedExpenses = expenses.sort((a, b) => new Date(b.date) - new Date(a.date));
-      setRecentTransactions(sortedExpenses.slice(0, 5)); // Get the 5 most recent transactions
-      const total = expenses.reduce((sum, expense) => sum + (parseFloat(expense.amount) || 0), 0);
-      setTotalSpent(total);
+      setRecentTransactions(expenses.slice(0, 5)); // Get the 5 most recent transactions
     } catch (error) {
       console.error('Error loading recent transactions:', error);
     }
-  };
+  }, []);
+
+  const loadBudgetData = useCallback(async () => {
+    try {
+      const { budget: storedBudget, spent: storedSpent } = await getBudgetAndSpent();
+      setBudget(storedBudget.toString());
+      setSpent(storedSpent.toString());
+    } catch (error) {
+      console.error('Error loading budget data:', error);
+    }
+  }, []);
 
   const addQuickExpense = async () => {
     if (quickExpense.trim() !== '') {
@@ -67,8 +63,8 @@ const DashboardScreen = ({ navigation }) => {
       };
       await saveExpense(newExpense);
       setQuickExpense('');
-      updateBudget(newExpense.amount);
-      loadRecentTransactions();
+      await loadRecentTransactions();
+      await loadBudgetData();
     }
   };
 
@@ -82,35 +78,24 @@ const DashboardScreen = ({ navigation }) => {
         description,
       };
       await saveExpense(newExpense);
-      updateBudget(newExpense.amount);
       setAmount('');
       setCategory('');
       setDate(new Date());
       setDescription('');
-      loadRecentTransactions(); // Reload recent transactions after adding a new expense
+      await loadRecentTransactions();
+      await loadBudgetData();
     }
   };
 
-  const updateBudget = async (expenseAmount) => {
+  const handleDeleteExpense = async (id) => {
     try {
-      const currentBudget = await AsyncStorage.getItem('budget');
-      if (currentBudget !== null) {
-        const updatedBudget = (parseFloat(currentBudget) - expenseAmount).toFixed(2);
-        await AsyncStorage.setItem('budget', updatedBudget);
-        setBudget(updatedBudget);
-      }
+      await deleteExpense(id);
+      loadRecentTransactions();
+      loadBudgetData();
+      Alert.alert('Success', 'Expense deleted successfully');
     } catch (error) {
-      console.error('Error updating budget:', error);
-    }
-  };
-
-  const setBudgetValue = async (value) => {
-    try {
-      const budgetValue = parseFloat(value).toFixed(2);
-      await AsyncStorage.setItem('budget', budgetValue);
-      setBudget(budgetValue);
-    } catch (error) {
-      console.error('Error setting budget:', error);
+      console.error('Error deleting expense:', error);
+      Alert.alert('Error', 'Failed to delete expense');
     }
   };
 
@@ -120,24 +105,35 @@ const DashboardScreen = ({ navigation }) => {
     setDate(currentDate);
   };
 
-  const renderTransaction = ({ item }) => {
-    if (!item) return null;
+  const renderRightActions = (id) => {
     return (
+      <TouchableOpacity
+        style={styles.deleteButton}
+        onPress={() => handleDeleteExpense(id)}
+      >
+        <Icon name="delete" size={24} color="#fff" />
+      </TouchableOpacity>
+    );
+  };
+
+  const renderTransaction = ({ item }) => (
+    <Swipeable renderRightActions={() => renderRightActions(item.id)}>
       <View style={[styles.transactionItem, { backgroundColor: isDarkMode ? '#333333' : '#F0F0F0' }]}>
         <View>
           <Text style={[styles.transactionAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>
-            ${item.amount ? item.amount.toFixed(2) : '0.00'}
+            ${parseFloat(item.amount).toFixed(2)}
           </Text>
           <Text style={[styles.transactionCategory, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>
-            {item.category || 'Uncategorized'}
+            {item.category}
           </Text>
         </View>
         <Text style={[styles.transactionDate, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>
-          {item.date ? new Date(item.date).toLocaleDateString() : 'No date'}
+          {item.date}
         </Text>
       </View>
-    );
-  };
+    </Swipeable>
+  );
+
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF' }]}>
@@ -155,34 +151,20 @@ const DashboardScreen = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.budgetInputContainer}>
-        <TextInput
-          style={[styles.budgetInput, { color: isDarkMode ? '#FFFFFF' : '#000000', borderColor: isDarkMode ? '#FFFFFF' : '#000000' }]}
-          placeholder="Set Budget"
-          placeholderTextColor={isDarkMode ? '#AAAAAA' : '#666666'}
-          keyboardType="numeric"
-          value={budget}
-          onChangeText={setBudgetValue}
-        />
-      </View>
-
       <View style={styles.budgetContainer}>
         <Text style={[styles.budgetLabel, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>Current Budget</Text>
         <Text style={[styles.budgetAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${parseFloat(budget).toFixed(2)}</Text>
+        <Text style={[styles.spentLabel, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>Spent</Text>
+        <Text style={[styles.spentAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${parseFloat(spent).toFixed(2)}</Text>
       </View>
 
-      <View style={styles.spentContainer}>
-        <Text style={[styles.spentLabel, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>Total Spent</Text>
-        <Text style={[styles.spentAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${totalSpent.toFixed(2)}</Text>
-      </View>
 
       <Text style={[styles.sectionTitle, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>Recent Transactions</Text>
       <FlatList
         data={recentTransactions}
         renderItem={renderTransaction}
-        keyExtractor={item => item?.id?.toString() || Math.random().toString()}
+        keyExtractor={item => item.id}
         style={styles.transactionList}
-        ListEmptyComponent={<Text style={{ color: isDarkMode ? '#FFFFFF' : '#000000' }}>No recent transactions</Text>}
       />
 
       <Text style={[styles.sectionTitle, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>Add New Expense</Text>
@@ -254,30 +236,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: 20,
   },
-  budgetContainer: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  budgetLabel: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  budgetAmount: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  spentContainer: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  spentLabel: {
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  spentAmount: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -303,6 +261,13 @@ const styles = StyleSheet.create({
   },
   transactionDate: {
     fontSize: 14,
+  },
+  deleteButton: {
+    backgroundColor: 'red',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
   },
   input: {
     height: 40,
@@ -337,14 +302,25 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  budgetInputContainer: {
+  budgetContainer: {
+    alignItems: 'center',
     marginBottom: 16,
   },
-  budgetInput: {
-    height: 40,
-    borderWidth: 1,
-    borderRadius: 4,
-    paddingHorizontal: 8,
+  budgetLabel: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  budgetAmount: {
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  spentLabel: {
+    fontSize: 14,
+    marginTop: 8,
+  },
+  spentAmount: {
+    fontSize: 20,
+    fontWeight: 'bold',
   },
 });
 

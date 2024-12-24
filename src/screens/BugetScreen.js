@@ -1,88 +1,99 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
-import { ProgressChart } from 'react-native-chart-kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getExpenses } from '../utils/localStorage';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import { getExpenses, updateBudgetAndSpent, getBudget, getSpent, setBudget, getBudgetAndSpent } from '../utils/localStorage';
+import { useFocusEffect } from '@react-navigation/native';
 
 const BudgetScreen = () => {
   const { isDarkMode } = useTheme();
-  const [budget, setBudget] = useState('');
+  const [budget, setBudget] = useState('0');
+  const [budgetInput, setBudgetInput] = useState('');
   const [spent, setSpent] = useState(0);
+
+  const loadBudgetData = useCallback(async () => {
+    try {
+      const { budget: storedBudget, spent: storedSpent } = await getBudgetAndSpent();
+      setBudget(storedBudget.toString());
+      setSpent(storedSpent);
+    } catch (error) {
+      console.error('Error loading budget data:', error);
+    }
+  }, []);
 
   useEffect(() => {
     loadBudgetData();
   }, []);
 
-  const loadBudgetData = async () => {
-    try {
-      const storedBudget = await AsyncStorage.getItem('budget');
-      if (storedBudget !== null) {
-        setBudget(storedBudget);
-      }
-      const expenses = await getExpenses();
-      const totalSpent = expenses.reduce((sum, expense) => sum + expense.amount, 0);
-      setSpent(totalSpent);
-    } catch (error) {
-      console.error('Error loading budget data:', error);
-    }
-  };
+  useFocusEffect(
+    useCallback(() => {
+      loadBudgetData();
+    }, [loadBudgetData])
+  );
 
   const handleSetBudget = async () => {
-    try {
-      await AsyncStorage.setItem('budget', budget);
-      console.log('Budget set:', budget);
-    } catch (error) {
-      console.error('Error setting budget:', error);
+    if (budgetInput) {
+      const newBudget = parseFloat(budgetInput);
+      const updatedBudget = await setBudget(newBudget);
+      if (updatedBudget !== null) {
+        setBudget(updatedBudget.toString());
+        setBudgetInput('');
+        await loadBudgetData();
+      } else {
+        Alert.alert('Error', 'Failed to set budget. Please try again.');
+      }
     }
   };
 
-  const remaining = Math.max(0, parseFloat(budget) - spent);
-
-  const chartConfig = {
-    backgroundGradientFrom: isDarkMode ? '#1E1E1E' : '#FFFFFF',
-    backgroundGradientTo: isDarkMode ? '#1E1E1E' : '#FFFFFF',
-    color: (opacity = 1) => `rgba(${isDarkMode ? '255, 255, 255' : '0, 0, 0'}, ${opacity})`,
-  };
-
-  const data = {
-    data: [spent / (parseFloat(budget) || 1)],
-  };
+  const remaining = parseFloat(budget) - spent;
+  const progress = budget ? (spent / parseFloat(budget)) * 100 : 0;
 
   return (
-    <View style={[styles.container, { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF' }]}>
+    <ScrollView style={[styles.container, { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF' }]}>
       <Text style={[styles.title, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>Monthly Budget</Text>
-      <View style={styles.budgetInputContainer}>
+
+      <View style={styles.budgetCircle}>
+        <Text style={[styles.budgetAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${parseFloat(budget).toFixed(2)}</Text>
+      </View>
+
+      <View style={styles.setBudgetContainer}>
         <TextInput
           style={[styles.budgetInput, { color: isDarkMode ? '#FFFFFF' : '#000000', borderColor: isDarkMode ? '#FFFFFF' : '#000000' }]}
-          placeholder="Enter budget"
+          placeholder="Set Budget"
           placeholderTextColor={isDarkMode ? '#AAAAAA' : '#666666'}
           keyboardType="numeric"
-          value={budget}
-          onChangeText={setBudget}
+          value={budgetInput}
+          onChangeText={setBudgetInput}
         />
         <TouchableOpacity style={styles.setBudgetButton} onPress={handleSetBudget}>
-          <Text style={styles.setBudgetButtonText}>Set Budget</Text>
+          <Text style={styles.setBudgetButtonText}>Set</Text>
         </TouchableOpacity>
       </View>
-      <View style={styles.chartContainer}>
-        <ProgressChart
-          data={data}
-          width={300}
-          height={200}
-          strokeWidth={16}
-          radius={32}
-          chartConfig={chartConfig}
-          hideLegend={true}
-        />
+
+      <View style={styles.statsContainer}>
+        <View style={[styles.statCard, { backgroundColor: isDarkMode ? '#333333' : '#F0F0F0' }]}>
+          <Icon name="attach-money" size={24} color={isDarkMode ? '#FFFFFF' : '#000000'} />
+          <Text style={[styles.statLabel, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>Spent</Text>
+          <Text style={[styles.statAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${spent.toFixed(2)}</Text>
+        </View>
+
+        <View style={[styles.statCard, { backgroundColor: isDarkMode ? '#333333' : '#F0F0F0' }]}>
+          <Icon name="savings" size={24} color={isDarkMode ? '#FFFFFF' : '#000000'} />
+          <Text style={[styles.statLabel, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>Remaining</Text>
+          <Text style={[styles.statAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${remaining.toFixed(2)}</Text>
+        </View>
       </View>
-      <Text style={[styles.spentText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>
-        Spent: ${spent.toFixed(2)} / ${parseFloat(budget).toFixed(2)}
-      </Text>
-      <Text style={[styles.remainingText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>
-        Remaining: ${remaining.toFixed(2)}
-      </Text>
-    </View>
+
+      <View style={styles.progressContainer}>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${progress}%` }]} />
+        </View>
+        <Text style={[styles.progressText, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>
+          {progress.toFixed(0)}% of budget used
+        </Text>
+      </View>
+    </ScrollView>
   );
 };
 
@@ -95,10 +106,26 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 16,
+    textAlign: 'center',
   },
-  budgetInputContainer: {
+  budgetCircle: {
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  budgetAmount: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  setBudgetContainer: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   budgetInput: {
     flex: 1,
@@ -110,7 +137,7 @@ const styles = StyleSheet.create({
   },
   setBudgetButton: {
     backgroundColor: '#4CAF50',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 4,
@@ -119,17 +146,43 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: 'bold',
   },
-  chartContainer: {
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  statCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 8,
     alignItems: 'center',
-    marginVertical: 16,
+    marginHorizontal: 4,
   },
-  spentText: {
-    fontSize: 18,
-    marginBottom: 8,
+  statLabel: {
+    fontSize: 14,
+    marginVertical: 4,
   },
-  remainingText: {
+  statAmount: {
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  progressContainer: {
+    marginTop: 20,
+  },
+  progressBar: {
+    height: 20,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+  },
+  progressText: {
+    marginTop: 8,
+    textAlign: 'center',
+    fontSize: 16,
   },
 });
 
