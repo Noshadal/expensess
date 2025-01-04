@@ -1,60 +1,32 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useBudget } from '../../context/BudgetContext';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { getExpenses, updateBudgetAndSpent, getBudget, getSpent, setBudget, getBudgetAndSpent } from '../utils/localStorage';
-import { useFocusEffect } from '@react-navigation/native';
 
 const BudgetScreen = () => {
   const { isDarkMode } = useTheme();
-  const [budget, setBudget] = useState('0');
+  const { budget, spent, updateBudget } = useBudget();
   const [budgetInput, setBudgetInput] = useState('');
-  const [spent, setSpent] = useState(0);
-
-  const loadBudgetData = useCallback(async () => {
-    try {
-      const { budget: storedBudget, spent: storedSpent } = await getBudgetAndSpent();
-      setBudget(storedBudget.toString());
-      setSpent(storedSpent);
-    } catch (error) {
-      console.error('Error loading budget data:', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadBudgetData();
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadBudgetData();
-    }, [loadBudgetData])
-  );
 
   const handleSetBudget = async () => {
     if (budgetInput) {
       const newBudget = parseFloat(budgetInput);
-      const updatedBudget = await setBudget(newBudget);
-      if (updatedBudget !== null) {
-        setBudget(updatedBudget.toString());
-        setBudgetInput('');
-        await loadBudgetData();
-      } else {
-        Alert.alert('Error', 'Failed to set budget. Please try again.');
-      }
+      await updateBudget(newBudget);
+      setBudgetInput('');
+      Alert.alert('Success', 'Budget updated successfully!');
     }
   };
 
-  const remaining = parseFloat(budget) - spent;
-  const progress = budget ? (spent / parseFloat(budget)) * 100 : 0;
+  const remaining = budget - spent;
+  const progress = budget ? (spent / budget) * 100 : 0;
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF' }]}>
       <Text style={[styles.title, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>Monthly Budget</Text>
 
       <View style={styles.budgetCircle}>
-        <Text style={[styles.budgetAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${parseFloat(budget).toFixed(2)}</Text>
+        <Text style={[styles.budgetAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${budget.toFixed(2)}</Text>
       </View>
 
       <View style={styles.setBudgetContainer}>

@@ -1,19 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ScrollView, Alert } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../context/ThemeContext';
-import { saveExpense, getExpenses, deleteExpense, updateBudgetAndSpent, getBudgetAndSpent } from '../utils/localStorage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { saveExpense, getExpenses, deleteExpense } from '../utils/localStorage';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Swipeable } from 'react-native-gesture-handler';
-import { useFocusEffect } from '@react-navigation/native';
+import { useBudget } from '../../context/BudgetContext';
 
 const DashboardScreen = ({ navigation }) => {
   const { isDarkMode } = useTheme();
+  const { budget, spent, updateSpent, loadBudgetData } = useBudget();
   const [quickExpense, setQuickExpense] = useState('');
   const [recentTransactions, setRecentTransactions] = useState([]);
-  const [budget, setBudget] = useState('0');
-  const [spent, setSpent] = useState('0'); // Update 1
 
   // Full expense form states
   const [amount, setAmount] = useState('');
@@ -27,30 +25,14 @@ const DashboardScreen = ({ navigation }) => {
     loadBudgetData();
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadBudgetData();
-    }, [loadBudgetData])
-  );
-
-  const loadRecentTransactions = useCallback(async () => {
+  const loadRecentTransactions = async () => {
     try {
       const expenses = await getExpenses();
       setRecentTransactions(expenses.slice(0, 5)); // Get the 5 most recent transactions
     } catch (error) {
       console.error('Error loading recent transactions:', error);
     }
-  }, []);
-
-  const loadBudgetData = useCallback(async () => {
-    try {
-      const { budget: storedBudget, spent: storedSpent } = await getBudgetAndSpent();
-      setBudget(storedBudget.toString());
-      setSpent(storedSpent.toString());
-    } catch (error) {
-      console.error('Error loading budget data:', error);
-    }
-  }, []);
+  };
 
   const addQuickExpense = async () => {
     if (quickExpense.trim() !== '') {
@@ -62,9 +44,9 @@ const DashboardScreen = ({ navigation }) => {
         description: 'Quick expense',
       };
       await saveExpense(newExpense);
+      await updateSpent(parseFloat(quickExpense));
       setQuickExpense('');
-      await loadRecentTransactions();
-      await loadBudgetData();
+      loadRecentTransactions();
     }
   };
 
@@ -78,20 +60,24 @@ const DashboardScreen = ({ navigation }) => {
         description,
       };
       await saveExpense(newExpense);
+      await updateSpent(parseFloat(amount));
       setAmount('');
       setCategory('');
       setDate(new Date());
       setDescription('');
-      await loadRecentTransactions();
-      await loadBudgetData();
+      loadRecentTransactions();
     }
   };
 
   const handleDeleteExpense = async (id) => {
     try {
+      const expenses = await getExpenses();
+      const expenseToDelete = expenses.find(expense => expense.id === id);
       await deleteExpense(id);
+      if (expenseToDelete) {
+        await updateSpent(-parseFloat(expenseToDelete.amount));
+      }
       loadRecentTransactions();
-      loadBudgetData();
       Alert.alert('Success', 'Expense deleted successfully');
     } catch (error) {
       console.error('Error deleting expense:', error);
@@ -134,7 +120,6 @@ const DashboardScreen = ({ navigation }) => {
     </Swipeable>
   );
 
-
   return (
     <ScrollView style={[styles.container, { backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF' }]}>
       <View style={styles.quickExpenseContainer}>
@@ -153,11 +138,10 @@ const DashboardScreen = ({ navigation }) => {
 
       <View style={styles.budgetContainer}>
         <Text style={[styles.budgetLabel, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>Current Budget</Text>
-        <Text style={[styles.budgetAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${parseFloat(budget).toFixed(2)}</Text>
+        <Text style={[styles.budgetAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${budget.toFixed(2)}</Text>
         <Text style={[styles.spentLabel, { color: isDarkMode ? '#AAAAAA' : '#666666' }]}>Spent</Text>
-        <Text style={[styles.spentAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${parseFloat(spent).toFixed(2)}</Text>
+        <Text style={[styles.spentAmount, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>${spent.toFixed(2)}</Text>
       </View>
-
 
       <Text style={[styles.sectionTitle, { color: isDarkMode ? '#FFFFFF' : '#000000' }]}>Recent Transactions</Text>
       <FlatList
